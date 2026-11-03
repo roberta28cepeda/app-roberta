@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   onAuthStateChanged,
@@ -17,6 +17,9 @@ import {
   CircleHelp,
   Clock3,
   Cloud,
+  CloudOff,
+  Download,
+  Upload,
   Dumbbell,
   Home,
   ListTodo,
@@ -33,7 +36,9 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { auth, firebaseConfigured, signInWithGoogle } from './firebase'
-import { useLifeData } from './data/useLifeData'
+import { clearLocalData, countRecords, readLocalData, useLifeData } from './data/useLifeData'
+import { downloadBackup, parseBackup } from './backup'
+import { generateRecurring } from './finance/recurring'
 import FinanceView from './finance/FinanceView'
 import { scheduleInstallments } from './finance/installments'
 import PlannerView from './planner/PlannerView'
@@ -124,9 +129,10 @@ function StatusPill({ status }: { status: string }) {
   const label = status === 'demo' ? 'Só neste aparelho'
     : status === 'loading' ? 'Sincronizando…'
       : status === 'saving' ? 'Salvando…'
+        : status === 'offline' ? 'Sem internet · envia depois'
         : status === 'saved' ? 'Google sincronizado'
           : status === 'error' ? 'Falha na sincronização' : 'Aguardando login'
-  const Icon = status === 'demo' ? Smartphone : status === 'error' ? CircleHelp : Cloud
+  const Icon = status === 'demo' ? Smartphone : status === 'error' ? CircleHelp : status === 'offline' ? CloudOff : Cloud
   return <span className={`status-pill ${status === 'error' ? 'status-error' : ''}`}><Icon size={13} />{label}</span>
 }
 
@@ -165,7 +171,9 @@ export default function App() {
   }, [])
 
   const demoMode = !firebaseConfigured
-  const { data, status, error: dataError, saveItem, removeItem } = useLifeData(account?.uid ?? null, demoMode)
+  const { data, status, error: dataError, saveItem, removeItem, saveMany } = useLifeData(account?.uid ?? null, demoMode)
+  const [localPending, setLocalPending] = useState(() => (firebaseConfigured ? countRecords(readLocalData()) : 0))
+  const restoreInput = useRef<HTMLInputElement>(null)
   const displayName = account?.displayName || account?.email?.split('@')[0] || 'Minha conta'
   const avatarInitial = displayName.trim().charAt(0).toLocaleUpperCase('pt-BR') || 'M'
 
@@ -179,6 +187,40 @@ export default function App() {
       if (plan && !window.confirm(`Excluir o plano “${plan.title}”? As tarefas ligadas a ele continuarão na lista.`)) return
     }
     await removeItem(name, id)
+  }
+
+  // Lançamentos recorrentes: cria o que já venceu (idempotente, pode rodar em qualquer aparelho).
+  useEffect(() => {
+    if (status !== 'saved' && status !== 'demo' && status !== 'offline') return
+    if (!data.recurring.length) return
+    const { expenses, incomes, updated } = generateRecurring(data.recurring, todayKey())
+    if (!updated.length) return
+    void saveMany({ expenses, incomes, recurring: updated }).catch((reason: unknown) => setNotice(friendlyError(reason)))
+  }, [data.recurring, status, saveMany])
+
+  async function sendLocalData() {
+    try {
+      await saveMany(readLocalData())
+      clearLocalData()
+      setLocalPending(0)
+      setNotice('Dados deste aparelho enviados para a sua conta.')
+    } catch (reason) { setNotice(friendlyError(reason)) }
+  }
+
+  function discardLocalData() {
+    if (!window.confirm('Descartar os dados salvos só neste aparelho? Esta ação não pode ser desfeita.')) return
+    clearLocalData()
+    setLocalPending(0)
+  }
+
+  async function restoreBackup(file?: File) {
+    if (!file) return
+    try {
+      const { payload, total } = parseBackup(await file.text())
+      if (!window.confirm(`Restaurar ${total} registro(s) do backup? Registros com o mesmo código serão substituídos; o restante é mantido.`)) return
+      await saveMany(payload)
+      setNotice(`${total} registro(s) restaurados do backup.`)
+    } catch (reason) { setNotice(friendlyError(reason)) }
   }
 
   useEffect(() => {
@@ -263,7 +305,7 @@ export default function App() {
   }
 
   let page: ReactNode
-  if (view === 'home') page = <HomeView data={data} displayName={displayName} onNavigate={setView} />
+  if (view === 'home') page = <HomeView data={data} displayName={displayName} onNavigate={setView} onBackup={() => downloadBackup(data)} onRestore={() => restoreInput.current?.click()} />
   else if (view === 'expenses') page = <FinanceView data={data} saveItem={saveItem} removeItem={removeItem} />
   else if (view === 'goals') page = <GoalsView data={data} saveItem={saveItem} removeItem={removeItem} />
   else if (view === 'planner') page = <PlannerView data={data} saveItem={saveItem} removeItem={removePlannerItem} />
@@ -309,9 +351,12 @@ export default function App() {
         </header>
         {demoMode && <div className="demo-banner"><CircleHelp size={16} /><span><strong>Prévia local:</strong> ainda não está ligada à sua conta Google. O que você inserir fica somente neste navegador.</span></div>}
         {dataError && <div className="error-banner"><CircleHelp size={16} /><span>Falha ao sincronizar: {dataError}</span></div>}
+        {localPending > 0 && account && (status === 'saved' || status === 'offline') && <div className="notice-banner"><Upload size={16} /><span>Há {localPending} registro(s) salvos só neste aparelho (de antes do login). Enviar para a sua conta?</span><button className="small-primary" type="button" onClick={() => void sendLocalData()}>Enviar</button><button className="ghost-button" type="button" onClick={discardLocalData}>Descartar</button></div>}
         {notice && <div className="notice-banner"><CheckCircle2 size={16} /><span>{notice}</span><button className="icon-button" type="button" onClick={() => setNotice('')} aria-label="Fechar aviso"><X size={15} /></button></div>}
         {page}
       </div>
+
+      <input ref={restoreInput} type="file" accept="application/json,.json" hidden onChange={(event) => { void restoreBackup(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
 
       <nav className="mobile-nav" aria-label="Navegação inferior">
         {navigation.map(({ key, label, icon: Icon }) => (
@@ -333,7 +378,7 @@ export default function App() {
   )
 }
 
-function HomeView({ data, displayName, onNavigate }: { data: LifeData; displayName: string; onNavigate: (view: ViewKey) => void }) {
+function HomeView({ data, displayName, onNavigate, onBackup, onRestore }: { data: LifeData; displayName: string; onNavigate: (view: ViewKey) => void; onBackup: () => void; onRestore: () => void }) {
   const today = todayKey()
   const month = currentMonthKey()
   const scheduled = data.installmentPlans.flatMap(scheduleInstallments).filter((item) => item.date.startsWith(month))
@@ -350,6 +395,18 @@ function HomeView({ data, displayName, onNavigate }: { data: LifeData; displayNa
   const completedGoals = data.goals.filter((goal) => goal.current >= goal.target).length
   const todaysTasks = openTasks.filter((task) => !task.dueDate || task.dueDate <= today).slice(0, 4)
   const todaysWorkouts = data.workouts.filter((workout) => workout.dayOfWeek === new Date().getDay())
+  const monthIncome = data.incomes.filter((income) => income.date.startsWith(month)).reduce((sum, item) => sum + item.amount, 0)
+  const budget = data.budgets.find((item) => item.month === month)?.amount
+  const freeAmount = budget === undefined ? null : budget - monthTotal - plannedTotal
+  const horizon = todayKey(new Date(Date.now() + 7 * 86400000))
+  const upcoming = [
+    ...scheduled.filter((item) => item.status === 'planned' && item.date >= today && item.date <= horizon)
+      .map((item) => ({ id: item.id, date: item.date, title: `${item.description} (${item.installmentNumber}/${item.installmentTotal})`, kind: currency.format(item.amount) })),
+    ...openTasks.filter((task) => task.dueDate && task.dueDate <= horizon)
+      .map((task) => ({ id: task.id, date: task.dueDate, title: task.title, kind: task.dueDate < today ? 'Atrasada' : 'Tarefa' })),
+    ...data.goals.filter((goal) => goal.current < goal.target && goal.dueDate && goal.dueDate <= horizon)
+      .map((goal) => ({ id: goal.id, date: goal.dueDate, title: goal.title, kind: 'Meta' })),
+  ].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 6)
   const headingDate = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date()).toLocaleUpperCase('pt-BR')
   return (
     <main className="page-wrap">
@@ -365,6 +422,21 @@ function HomeView({ data, displayName, onNavigate }: { data: LifeData; displayNa
       </div>
       <div className="home-columns">
         <section className="panel home-panel">
+          <div className="panel-heading"><div><span className="section-kicker">Este mês</span><h2>Resumo financeiro</h2></div><button className="text-button" type="button" onClick={() => onNavigate('expenses')}>Abrir gastos <ArrowUpRight size={14} /></button></div>
+          <div className="summary-rows">
+            <div><span>Recebido</span><strong>{currency.format(monthIncome)}</strong></div>
+            <div><span>Gasto</span><strong>{currency.format(monthTotal)}</strong></div>
+            <div><span>Saldo</span><strong className={monthIncome - monthTotal < 0 ? 'summary-negative' : ''}>{currency.format(monthIncome - monthTotal)}</strong></div>
+            <div><span>{freeAmount === null ? 'Limite do mês' : freeAmount < 0 ? 'Acima do limite' : 'Ainda livre'}</span><strong className={freeAmount !== null && freeAmount < 0 ? 'summary-negative' : ''}>{freeAmount === null ? 'não definido' : currency.format(Math.abs(freeAmount))}</strong></div>
+          </div>
+        </section>
+        <section className="panel home-panel">
+          <div className="panel-heading"><div><span className="section-kicker">Próximos 7 dias</span><h2>Vencimentos</h2></div></div>
+          {upcoming.length ? <div className="home-task-list">{upcoming.map((item) => <div className="home-task" key={item.id}><span className="home-task-title">{item.title}</span><span className="summary-tag">{item.kind}</span><time>{formatDate(item.date)}</time></div>)}</div> : <EmptyState icon={CheckCircle2} title="Nada vencendo esta semana" detail="Parcelas, tarefas e metas com prazo próximo aparecem aqui." />}
+        </section>
+      </div>
+      <div className="home-columns">
+        <section className="panel home-panel">
           <div className="panel-heading"><div><span className="section-kicker">Seu próximo passo</span><h2>Para hoje</h2></div><button className="text-button" type="button" onClick={() => onNavigate('planner')}>Ver tarefas <ArrowUpRight size={14} /></button></div>
           {todaysTasks.length ? <div className="home-task-list">{todaysTasks.map((task) => <div className="home-task" key={task.id}><span className="task-check" /><span className="home-task-title">{task.title}</span><span className={`priority-dot priority-${task.priority.toLowerCase()}`} />{task.dueDate && <time>{formatDate(task.dueDate)}</time>}</div>)}</div> : <EmptyState icon={CheckCircle2} title="Tudo em dia por aqui" detail="Adicione uma tarefa quando quiser organizar o próximo passo." />}
         </section>
@@ -372,6 +444,11 @@ function HomeView({ data, displayName, onNavigate }: { data: LifeData; displayNa
           <div className="highlight-orb"><Sparkles size={20} /></div><span className="section-kicker">Seu ritmo, suas escolhas</span><h2>Pequenos passos<br />também são progresso.</h2><p>Metas, planos, gastos e treino no mesmo lugar — sem pressa para fazer tudo de uma vez.</p><button className="ghost-button" type="button" onClick={() => onNavigate('goals')}>Revisar minhas metas <ArrowUpRight size={14} /></button>
         </section>
       </div>
+      <section className="panel home-panel backup-panel">
+        <div className="panel-heading"><div><span className="section-kicker">Segurança</span><h2>Seus dados</h2></div></div>
+        <p className="muted-small">Baixe uma cópia completa (gastos, metas, planner, livros, treinos…) ou restaure um backup anterior.</p>
+        <div className="backup-actions"><button className="ghost-button" type="button" onClick={onBackup}><Download size={15} />Baixar backup</button><button className="ghost-button" type="button" onClick={onRestore}><Upload size={15} />Restaurar backup</button></div>
+      </section>
       <div className="section-title-row"><div><span className="section-kicker">Seu espaço pessoal</span><h2>Continue de onde parou</h2></div></div>
       <div className="quick-grid">
         <QuickAction icon={WalletCards} title="Anotar um gasto" detail="Registre e acompanhe" onClick={() => onNavigate('expenses')} />

@@ -138,8 +138,21 @@ export type CustomCategory = {
   name: string
 }
 
-export type AppRecord = Expense | InstallmentPlan | Income | MonthlyBudget | Goal | Task | Plan | DailyNote | WishlistItem | ReadingBook | RestockItem | WorkoutRoutine | WorkoutLog | CustomCategory
-export type CollectionName = 'expenses' | 'installmentPlans' | 'incomes' | 'budgets' | 'goals' | 'tasks' | 'plans' | 'dailyNotes' | 'wishlist' | 'books' | 'restockItems' | 'workouts' | 'workoutLogs' | 'categories'
+export type RecurringItem = {
+  id: string
+  kind: 'expense' | 'income'
+  description: string
+  category: string
+  amount: number
+  dayOfMonth: number
+  startMonth: string
+  active: boolean
+  lastGenerated: string
+  createdAt: string
+}
+
+export type AppRecord = RecurringItem | Expense | InstallmentPlan | Income | MonthlyBudget | Goal | Task | Plan | DailyNote | WishlistItem | ReadingBook | RestockItem | WorkoutRoutine | WorkoutLog | CustomCategory
+export type CollectionName = 'expenses' | 'installmentPlans' | 'incomes' | 'budgets' | 'goals' | 'tasks' | 'plans' | 'dailyNotes' | 'wishlist' | 'books' | 'restockItems' | 'workouts' | 'workoutLogs' | 'categories' | 'recurring'
 
 export type LifeData = {
   expenses: Expense[]
@@ -156,15 +169,16 @@ export type LifeData = {
   workouts: WorkoutRoutine[]
   workoutLogs: WorkoutLog[]
   categories: CustomCategory[]
+  recurring: RecurringItem[]
 }
 
 export const COLLECTION_NAMES: CollectionName[] = [
-  'expenses', 'installmentPlans', 'incomes', 'budgets', 'goals', 'tasks', 'plans', 'dailyNotes', 'wishlist', 'books', 'restockItems', 'workouts', 'workoutLogs', 'categories',
+  'expenses', 'installmentPlans', 'incomes', 'budgets', 'goals', 'tasks', 'plans', 'dailyNotes', 'wishlist', 'books', 'restockItems', 'workouts', 'workoutLogs', 'categories', 'recurring',
 ]
 
 export function emptyLifeData(): LifeData {
   return {
     expenses: [], installmentPlans: [], incomes: [], budgets: [], goals: [], tasks: [], plans: [],
-    dailyNotes: [], wishlist: [], books: [], restockItems: [], workouts: [], workoutLogs: [], categories: [],
+    dailyNotes: [], wishlist: [], books: [], restockItems: [], workouts: [], workoutLogs: [], categories: [], recurring: [],
   }
 }

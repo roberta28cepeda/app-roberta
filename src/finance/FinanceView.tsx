@@ -22,11 +22,13 @@ import {
   WalletCards,
   X,
   Pencil,
+  Repeat,
 } from 'lucide-react'
 import type { AppRecord, CollectionName, CustomCategory, Expense, Income, InstallmentPlan, LifeData, MonthlyBudget } from '../types'
 import { defaultCategoryNames, getCategoryMeta, getSavingsIdea } from './categories'
 import { downloadExpensesCsv, downloadIncomesCsv, parseExpenseCsv, parseIncomeCsv } from './csv'
 import { scheduleInstallments } from './installments'
+import RecurringModal from './RecurringModal'
 import './FinanceView.css'
 
 type FinanceViewProps = {
@@ -149,6 +151,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
   const [budgetError, setBudgetError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [categoryModalOpen, setCategoryModalOpen] = useState(false)
+  const [recurringOpen, setRecurringOpen] = useState(false)
   const [editing, setEditing] = useState<{ type: 'expense' | 'income' | 'installmentPlan'; id: string } | null>(null)
   const [formError, setFormError] = useState('')
   const [importMessage, setImportMessage] = useState('')
@@ -590,6 +593,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
           <p>Veja o que entrou, o que saiu e quanto ainda cabe no seu mês.</p>
         </div>
         <div className="finance-heading-actions">
+          <button className="ghost-button" type="button" onClick={() => setRecurringOpen(true)}><Repeat size={15} />Recorrentes</button>
           <button className="ghost-button finance-income-cta" type="button" onClick={() => openNewEntry('income')}><ArrowUpRight size={15} />Adicionar recebimento</button>
           <button className="primary-button" type="button" onClick={() => openNewEntry('expense')}><Plus size={16} />Nova despesa</button>
         </div>
@@ -758,6 +762,8 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
           <button className="primary-button form-submit" type="submit"><Plus size={15} />{editing ? 'Salvar alterações' : form.type === 'income' ? 'Salvar recebimento' : 'Salvar despesa'}</button>
         </form>
       </section></div>}
+
+      {recurringOpen && <RecurringModal data={data} saveItem={saveItem} removeItem={removeItem} onClose={() => setRecurringOpen(false)} />}
 
       {categoryModalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCategoryModalOpen(false) }}><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="finance-category-title">
         <div className="modal-heading"><div><span className="section-kicker">Organize do seu jeito</span><h2 id="finance-category-title">Nova categoria</h2></div><button className="icon-button" type="button" onClick={() => setCategoryModalOpen(false)} aria-label="Fechar"><X size={18} /></button></div>
