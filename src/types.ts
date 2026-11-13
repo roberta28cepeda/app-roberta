@@ -152,6 +152,7 @@ export type RecurringItem = {
   startMonth: string
   active: boolean
   lastGenerated: string
+  paidMonths?: string[]
   createdAt: string
   card?: string
   payment?: string

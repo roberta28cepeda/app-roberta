@@ -38,7 +38,7 @@ import type { LucideIcon } from 'lucide-react'
 import { auth, firebaseConfigured, LOGIN_PENDING_KEY, signInWithGoogle } from './firebase'
 import { clearLocalData, countRecords, readLocalData, useLifeData } from './data/useLifeData'
 import { downloadBackup, parseBackup } from './backup'
-import { generateRecurring } from './finance/recurring'
+import { legacyRecurringIds, recurringEntries } from './finance/recurring'
 import FinanceView from './finance/FinanceView'
 import { scheduleInstallments } from './finance/installments'
 import PlannerView from './planner/PlannerView'
@@ -199,15 +199,6 @@ export default function App() {
     }
     await removeItem(name, id)
   }
-
-  // Lançamentos recorrentes: cria o que já venceu (idempotente, pode rodar em qualquer aparelho).
-  useEffect(() => {
-    if (status !== 'saved' && status !== 'demo' && status !== 'offline') return
-    if (!data.recurring.length) return
-    const { expenses, incomes, updated } = generateRecurring(data.recurring, todayKey())
-    if (!updated.length) return
-    void saveMany({ expenses, incomes, recurring: updated }).catch((reason: unknown) => setNotice(friendlyError(reason)))
-  }, [data.recurring, status, saveMany])
 
   async function sendLocalData() {
     try {
@@ -394,25 +385,31 @@ function HomeView({ data, displayName, onNavigate, onBackup, onRestore }: { data
   const month = currentMonthKey()
   const scheduled = data.installmentPlans.flatMap(scheduleInstallments).filter((item) => item.date.startsWith(month))
   const paidPlan = scheduled.filter((item) => item.status === 'paid')
-  const plannedTotal = scheduled.filter((item) => item.status === 'planned').reduce((sum, item) => sum + item.amount, 0)
+  const recurringMonth = recurringEntries(data.recurring, legacyRecurringIds([...data.expenses, ...data.incomes]), { type: 'month', month })
+  const recurringPaidSpent = recurringMonth.filter((item) => item.kind === 'expense' && item.status === 'paid').reduce((sum, item) => sum + item.amount, 0)
+  const recurringPlanned = recurringMonth.filter((item) => item.kind === 'expense' && item.status === 'planned')
+  const recurringPaidIncome = recurringMonth.filter((item) => item.kind === 'income' && item.status === 'paid').reduce((sum, item) => sum + item.amount, 0)
+  const plannedTotal = scheduled.filter((item) => item.status === 'planned').reduce((sum, item) => sum + item.amount, 0) + recurringPlanned.reduce((sum, item) => sum + item.amount, 0)
   const convertedExpenseIds = new Set(data.installmentPlans.map((plan) => plan.sourceExpenseId).filter((id): id is string => Boolean(id)))
   const monthExpenses = data.expenses.filter((expense) => !convertedExpenseIds.has(expense.id) && expense.date.startsWith(month))
-  const monthTotal = monthExpenses.reduce((sum, item) => sum + item.amount, 0) + paidPlan.reduce((sum, item) => sum + item.amount, 0)
-  const monthExpenseCount = monthExpenses.length + paidPlan.length
+  const monthTotal = monthExpenses.reduce((sum, item) => sum + item.amount, 0) + paidPlan.reduce((sum, item) => sum + item.amount, 0) + recurringPaidSpent
+  const monthExpenseCount = monthExpenses.length + paidPlan.length + recurringMonth.filter((item) => item.kind === 'expense' && item.status === 'paid').length
   const monthExpenseDetail = monthExpenseCount
-    ? `${monthExpenseCount} lançamento(s)${plannedTotal ? ` · ${currency.format(plannedTotal)} em parcelas previstas` : ''}`
-    : plannedTotal ? `${currency.format(plannedTotal)} em parcelas previstas` : 'Nenhum lançamento ainda'
+    ? `${monthExpenseCount} lançamento(s)${plannedTotal ? ` · ${currency.format(plannedTotal)} previstos` : ''}`
+    : plannedTotal ? `${currency.format(plannedTotal)} previstos` : 'Nenhum lançamento ainda'
   const openTasks = data.tasks.filter((task) => task.status === 'Pendente')
   const completedGoals = data.goals.filter((goal) => goal.current >= goal.target).length
   const todaysTasks = openTasks.filter((task) => !task.dueDate || task.dueDate <= today).slice(0, 4)
   const todaysWorkouts = data.workouts.filter((workout) => workout.dayOfWeek === new Date().getDay())
-  const monthIncome = data.incomes.filter((income) => income.date.startsWith(month)).reduce((sum, item) => sum + item.amount, 0)
+  const monthIncome = data.incomes.filter((income) => income.date.startsWith(month)).reduce((sum, item) => sum + item.amount, 0) + recurringPaidIncome
   const budget = data.budgets.find((item) => item.month === month)?.amount
   const freeAmount = budget === undefined ? null : budget - monthTotal - plannedTotal
   const horizon = todayKey(new Date(Date.now() + 7 * 86400000))
   const upcoming = [
     ...scheduled.filter((item) => item.status === 'planned' && item.date >= today && item.date <= horizon)
       .map((item) => ({ id: item.id, date: item.date, title: `${item.description} (${item.installmentNumber}/${item.installmentTotal})`, kind: currency.format(item.amount) })),
+    ...recurringPlanned.filter((item) => item.date >= today && item.date <= horizon)
+      .map((item) => ({ id: item.id, date: item.date, title: `${item.description} (recorrente)`, kind: currency.format(item.amount) })),
     ...openTasks.filter((task) => task.dueDate && task.dueDate <= horizon)
       .map((task) => ({ id: task.id, date: task.dueDate, title: task.title, kind: task.dueDate < today ? 'Atrasada' : 'Tarefa' })),
     ...data.goals.filter((goal) => goal.current < goal.target && goal.dueDate && goal.dueDate <= horizon)

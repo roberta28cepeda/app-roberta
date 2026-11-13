@@ -30,6 +30,7 @@ import { downloadExpensesCsv, downloadIncomesCsv, parseExpenseCsv, parseIncomeCs
 import { scheduleInstallments } from './installments'
 import { cardMethods, paymentFields, paymentLabel, paymentMethods, readLastPayment, saveLastPayment } from './payment'
 import RecurringModal from './RecurringModal'
+import { legacyRecurringIds, recurringEntries, setRecurringPaid } from './recurring'
 import './FinanceView.css'
 
 type FinanceViewProps = {
@@ -62,6 +63,8 @@ type LedgerRow = {
   installmentNumber?: number
   installmentTotal?: number
   planId?: string
+  recurringId?: string
+  recurringMonth?: string
   status: 'paid' | 'planned'
   card?: string
   payment?: string
@@ -214,20 +217,32 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
     })),
     [scheduledInstallments],
   )
+  const legacyRecurring = useMemo(() => legacyRecurringIds([...data.expenses, ...data.incomes]), [data.expenses, data.incomes])
+  const recurringAll = useMemo(() => recurringEntries(data.recurring, legacyRecurring, { type: 'all', upTo: currentMonthKey() }), [data.recurring, legacyRecurring])
+  const recurringMonth = useMemo(() => recurringEntries(data.recurring, legacyRecurring, { type: 'month', month: selectedMonth }), [data.recurring, legacyRecurring, selectedMonth])
+  const paidRecurringExpenses = useMemo<Expense[]>(() => recurringAll.filter((item) => item.kind === 'expense' && item.status === 'paid').map((item) => ({
+    id: item.id, description: item.description, category: item.category, amount: item.amount, date: item.date,
+    ...(item.card ? { card: item.card } : {}), ...(item.payment ? { payment: item.payment } : {}),
+  })), [recurringAll])
+  const paidRecurringIncomes = useMemo<Income[]>(() => recurringAll.filter((item) => item.kind === 'income' && item.status === 'paid').map((item) => ({
+    id: item.id, description: item.description, source: item.category, amount: item.amount, date: item.date,
+  })), [recurringAll])
   const allPaidExpenses = useMemo(() => [
     ...data.expenses.filter((item) => !convertedExpenseIds.has(item.id)),
     ...paidPlanExpenses,
-  ], [convertedExpenseIds, data.expenses, paidPlanExpenses])
+    ...paidRecurringExpenses,
+  ], [convertedExpenseIds, data.expenses, paidPlanExpenses, paidRecurringExpenses])
   const monthExpenses = useMemo(
     () => allPaidExpenses.filter((item) => item.date.startsWith(selectedMonth)),
     [allPaidExpenses, selectedMonth],
   )
   const monthIncomes = useMemo(
-    () => data.incomes.filter((item) => item.date.startsWith(selectedMonth)),
-    [data.incomes, selectedMonth],
+    () => [...data.incomes, ...paidRecurringIncomes].filter((item) => item.date.startsWith(selectedMonth)),
+    [data.incomes, paidRecurringIncomes, selectedMonth],
   )
   const pendingMonthInstallments = scheduledInstallments.filter((item) => item.status === 'planned' && item.date.startsWith(selectedMonth))
-  const pendingMonthAmount = pendingMonthInstallments.reduce((sum, item) => sum + item.amount, 0)
+  const pendingMonthRecurring = recurringMonth.filter((item) => item.kind === 'expense' && item.status === 'planned')
+  const pendingMonthAmount = pendingMonthInstallments.reduce((sum, item) => sum + item.amount, 0) + pendingMonthRecurring.reduce((sum, item) => sum + item.amount, 0)
   const totalSpent = monthExpenses.reduce((sum, item) => sum + item.amount, 0)
   const totalReceived = monthIncomes.reduce((sum, item) => sum + item.amount, 0)
   const monthBalance = totalReceived - totalSpent
@@ -282,8 +297,10 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
     for (const item of analysisExpenses) add(paymentLabel(item.payment, item.card) || 'Não informado', 'paid', item.amount)
     const planned = periodFilter === 'all' ? scheduledInstallments.filter((item) => item.status === 'planned') : pendingMonthInstallments
     for (const item of planned) add(paymentLabel(item.payment, item.card) || 'Não informado', 'planned', item.amount)
+    const plannedRecurring = periodFilter === 'all' ? recurringAll.filter((item) => item.kind === 'expense' && item.status === 'planned') : pendingMonthRecurring
+    for (const item of plannedRecurring) add(paymentLabel(item.payment, item.card) || 'Não informado', 'planned', item.amount)
     return [...groups.values()].sort((a, b) => (b.paid + b.planned) - (a.paid + a.planned))
-  }, [analysisExpenses, pendingMonthInstallments, periodFilter, scheduledInstallments])
+  }, [analysisExpenses, pendingMonthInstallments, pendingMonthRecurring, periodFilter, recurringAll, scheduledInstallments])
   const topCategory = breakdown[0]
   const savingsIdea = getSavingsIdea(topCategory?.label)
   const chartGradient = useMemo(() => {
@@ -326,7 +343,13 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       id: item.id, type: 'income', date: item.date, description: item.description,
       category: item.source, amount: item.amount, status: 'paid',
     }))
+    const recurringRows: LedgerRow[] = (periodFilter === 'month' ? recurringMonth : recurringAll).map((item) => ({
+      id: item.id, type: item.kind, date: item.date, description: item.description, category: item.category,
+      amount: item.amount, status: item.status, recurringId: item.recurringId, recurringMonth: item.month,
+      card: item.card, payment: item.payment,
+    }))
     const base = [
+      ...recurringRows,
       ...(periodFilter === 'month' ? [...expenses, ...automatic].filter((item) => item.date.startsWith(selectedMonth)) : [...expenses, ...automatic]),
       ...(periodFilter === 'month' ? incomes.filter((item) => item.date.startsWith(selectedMonth)) : incomes),
     ]
@@ -339,10 +362,10 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       if (normalizedQuery && !`${item.description} ${item.category} ${item.payment ?? ''} ${item.card ?? ''}`.toLocaleLowerCase('pt-BR').includes(normalizedQuery)) return false
       return true
     }).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
-  }, [categoryFilter, convertedExpenseIds, data.expenses, data.incomes, periodFilter, query, scheduledInstallments, selectedMonth, typeFilter])
+  }, [categoryFilter, convertedExpenseIds, data.expenses, data.incomes, periodFilter, query, recurringAll, recurringMonth, scheduledInstallments, selectedMonth, typeFilter])
   const visibleSpent = ledgerRows.filter((item) => item.type === 'expense' && item.status === 'paid').reduce((sum, item) => sum + item.amount, 0)
   const visiblePlanned = ledgerRows.filter((item) => item.type === 'expense' && item.status === 'planned').reduce((sum, item) => sum + item.amount, 0)
-  const visibleReceived = ledgerRows.filter((item) => item.type === 'income').reduce((sum, item) => sum + item.amount, 0)
+  const visibleReceived = ledgerRows.filter((item) => item.type === 'income' && item.status === 'paid').reduce((sum, item) => sum + item.amount, 0)
   const hasFilters = Boolean(query || categoryFilter !== 'Todas' || typeFilter !== 'all' || periodFilter !== 'month')
 
   function resetFilters() {
@@ -514,7 +537,20 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
     catch (error) { setImportMessage(errorMessage(error)) }
   }
 
+  async function toggleRecurringPaid(recurringId: string, month: string, paid: boolean) {
+    const item = data.recurring.find((entry) => entry.id === recurringId)
+    if (!item) return
+    try { await saveItem('recurring', setRecurringPaid(item, month, paid)) } catch (error) { setImportMessage(errorMessage(error)) }
+  }
+
   async function deleteEntry(item: LedgerRow) {
+    if (item.recurringId) {
+      const series = data.recurring.find((entry) => entry.id === item.recurringId)
+      if (!series) return
+      if (!window.confirm(`Excluir a recorrência “${series.description}” (todos os meses)? Para só pausar, use “Recorrentes”.`)) return
+      try { await removeItem('recurring', series.id) } catch (error) { setImportMessage(errorMessage(error)) }
+      return
+    }
     if (item.planId) {
       const plan = data.installmentPlans.find((entry) => entry.id === item.planId)
       if (plan) await deleteInstallmentPlan(plan)
@@ -718,12 +754,14 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
                     <span className={`expense-icon finance-ledger-icon finance-icon-${item.type}`}><CategoryIcon size={16} /></span>
                     <span className="expense-description finance-ledger-description"><strong>{item.description}</strong><small>{item.type === 'income' ? `Recebido · ${item.category}` : `${item.category}${paymentLabel(item.payment, item.card) ? ` · ${paymentLabel(item.payment, item.card)}` : ''}`}</small>
                       {item.planId && item.installmentNumber && <small className="finance-installment-detail">Parcela {item.installmentNumber}/{item.installmentTotal} · {item.status === 'planned' ? 'prevista' : 'paga'} · <button className="finance-installment-toggle" type="button" onClick={() => void setInstallmentPaid(item.planId!, item.installmentNumber!, item.status !== 'paid')}>{item.status === 'planned' ? 'Marcar como paga' : 'Desfazer pagamento'}</button></small>}
+                      {item.recurringId && item.recurringMonth && <small className="finance-installment-detail">Recorrente · {item.status === 'planned' ? 'prevista' : item.type === 'income' ? 'recebida' : 'paga'} · <button className="finance-installment-toggle" type="button" onClick={() => void toggleRecurringPaid(item.recurringId!, item.recurringMonth!, item.status !== 'paid')}>{item.status === 'planned' ? (item.type === 'income' ? 'Marcar como recebida' : 'Marcar como paga') : 'Desfazer'}</button></small>}
                       {item.type === 'expense' && !item.planId && item.installmentTotal && item.installmentNumber && <small className="finance-installment-detail">Parcela {item.installmentNumber}/{item.installmentTotal} · faltam {remainingCount}{remainingCount ? ` · ${currency.format(remainingAmount)} restantes` : ' · última parcela'}</small>}
                     </span>
                     <strong className={`expense-amount finance-ledger-amount finance-amount-${item.type}${item.status === 'planned' ? ' finance-amount-planned' : ''}`}>{item.type === 'income' ? '+' : item.status === 'planned' ? '~' : '−'} {currency.format(item.amount)}</strong>
                     <span className="row-actions finance-row-actions">
                       <button className="icon-button" type="button" aria-label={plan ? `Editar todas as parcelas de ${item.description}` : `Editar ${item.description}`} onClick={() => {
-                        if (plan) openEditInstallmentPlan(plan)
+                        if (item.recurringId) setRecurringOpen(true)
+                        else if (plan) openEditInstallmentPlan(plan)
                         else if (item.type === 'expense') openEditExpense({ id: item.id, description: item.description, category: item.category, amount: item.amount, date: item.date, installmentNumber: item.installmentNumber, installmentTotal: item.installmentTotal, card: item.card, payment: item.payment })
                         else openEditIncome({ id: item.id, description: item.description, source: item.category, amount: item.amount, date: item.date })
                       }}><Pencil size={14} /></button>

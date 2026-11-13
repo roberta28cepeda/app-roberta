@@ -71,7 +71,7 @@ export default function RecurringModal({ data, saveItem, removeItem, onClose }: 
           <div><span className="section-kicker">Automático todo mês</span><h2>Lançamentos recorrentes</h2></div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Fechar"><X size={18} /></button>
         </div>
-        <p className="muted-small">Salário, aluguel, assinaturas… Cada item vira um lançamento no dia escolhido, todo mês, sem você precisar cadastrar de novo.</p>
+        <p className="muted-small">Salário, aluguel, assinaturas… Cada mês aparece na lista de lançamentos como prevista, no dia escolhido. Marque como paga (ou recebida) quando acontecer; só então ela entra no total gasto.</p>
         {items.length > 0 && <div className="recurring-list">{items.map((item) => (
           <div className={`recurring-row${item.active ? '' : ' recurring-off'}`} key={item.id}>
             <span className="recurring-icon"><Repeat size={15} /></span>
