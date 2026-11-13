@@ -243,3 +243,9 @@
   .finance-savings-card p { font-size: 8px; }
   .finance-year-total strong { font-size: 11px; }
 }
+
+.finance-filters-extra { flex-wrap: wrap; padding-top: 0; }
+.finance-filters-extra .select-wrap { width: auto; min-width: 150px; flex: 1 1 150px; }
+.finance-date-filter { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #526b7a; }
+.finance-date-filter input { height: 35px; border: 1px solid #dfeaf0; background: #fbfdff; border-radius: 7px; padding: 0 8px; color: #526b7a; font-size: 11px; }
+.finance-due-note { flex-basis: 100%; margin: 0; font-size: 11px; color: #7a8f9b; }

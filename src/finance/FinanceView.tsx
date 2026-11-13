@@ -30,7 +30,7 @@ import { downloadExpensesCsv, downloadIncomesCsv, parseExpenseCsv, parseIncomeCs
 import { scheduleInstallments } from './installments'
 import { cardMethods, paymentFields, paymentLabel, paymentMethods, readLastPayment, saveLastPayment } from './payment'
 import RecurringModal from './RecurringModal'
-import { legacyRecurringIds, recurringEntries, setRecurringPaid } from './recurring'
+import { legacyRecurringIds, recurringEntries, setRecurringPaid, shiftMonthKey } from './recurring'
 import './FinanceView.css'
 
 type FinanceViewProps = {
@@ -85,6 +85,23 @@ type InstallmentPanelItem = {
 }
 
 type TypeFilter = 'all' | 'expense' | 'income' | 'installments'
+type DueFilter = 'any' | 'overdue' | 'today' | '7' | '15' | '30' | 'custom'
+
+const dueOptions: { value: DueFilter; label: string }[] = [
+  { value: 'any', label: 'Qualquer vencimento' },
+  { value: 'overdue', label: 'Vencidos (em aberto)' },
+  { value: 'today', label: 'Vencem hoje' },
+  { value: '7', label: 'Próximos 7 dias' },
+  { value: '15', label: 'Próximos 15 dias' },
+  { value: '30', label: 'Próximos 30 dias' },
+  { value: 'custom', label: 'Período personalizado' },
+]
+
+function dateInDays(days: number) {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const incomeSources = ['Salário', 'Renda extra', 'Investimentos', 'Reembolso', 'Outros']
@@ -155,6 +172,11 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [categoryFilter, setCategoryFilter] = useState('Todas')
   const [query, setQuery] = useState('')
+  const [cardFilter, setCardFilter] = useState('Todos')
+  const [paymentFilter, setPaymentFilter] = useState('Todas')
+  const [dueFilter, setDueFilter] = useState<DueFilter>('any')
+  const [dueFrom, setDueFrom] = useState('')
+  const [dueTo, setDueTo] = useState('')
   const [budgetDraft, setBudgetDraft] = useState('')
   const [budgetError, setBudgetError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
@@ -220,6 +242,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
   const legacyRecurring = useMemo(() => legacyRecurringIds([...data.expenses, ...data.incomes]), [data.expenses, data.incomes])
   const recurringAll = useMemo(() => recurringEntries(data.recurring, legacyRecurring, { type: 'all', upTo: currentMonthKey() }), [data.recurring, legacyRecurring])
   const recurringMonth = useMemo(() => recurringEntries(data.recurring, legacyRecurring, { type: 'month', month: selectedMonth }), [data.recurring, legacyRecurring, selectedMonth])
+  const recurringAhead = useMemo(() => recurringEntries(data.recurring, legacyRecurring, { type: 'all', upTo: shiftMonthKey(currentMonthKey(), 2) }), [data.recurring, legacyRecurring])
   const paidRecurringExpenses = useMemo<Expense[]>(() => recurringAll.filter((item) => item.kind === 'expense' && item.status === 'paid').map((item) => ({
     id: item.id, description: item.description, category: item.category, amount: item.amount, date: item.date,
     ...(item.card ? { card: item.card } : {}), ...(item.payment ? { payment: item.payment } : {}),
@@ -343,36 +366,56 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       id: item.id, type: 'income', date: item.date, description: item.description,
       category: item.source, amount: item.amount, status: 'paid',
     }))
-    const recurringRows: LedgerRow[] = (periodFilter === 'month' ? recurringMonth : recurringAll).map((item) => ({
+    const monthOnly = periodFilter === 'month' && dueFilter === 'any'
+    const recurringSource = dueFilter !== 'any' ? recurringAhead : periodFilter === 'month' ? recurringMonth : recurringAll
+    const recurringRows: LedgerRow[] = recurringSource.map((item) => ({
       id: item.id, type: item.kind, date: item.date, description: item.description, category: item.category,
       amount: item.amount, status: item.status, recurringId: item.recurringId, recurringMonth: item.month,
       card: item.card, payment: item.payment,
     }))
     const base = [
       ...recurringRows,
-      ...(periodFilter === 'month' ? [...expenses, ...automatic].filter((item) => item.date.startsWith(selectedMonth)) : [...expenses, ...automatic]),
-      ...(periodFilter === 'month' ? incomes.filter((item) => item.date.startsWith(selectedMonth)) : incomes),
+      ...(monthOnly ? [...expenses, ...automatic].filter((item) => item.date.startsWith(selectedMonth)) : [...expenses, ...automatic]),
+      ...(monthOnly ? incomes.filter((item) => item.date.startsWith(selectedMonth)) : incomes),
     ]
     const normalizedQuery = query.trim().toLocaleLowerCase('pt-BR')
-    return base.filter((item) => {
+    const today = todayKey()
+    const dueLimit = dueFilter === '7' || dueFilter === '15' || dueFilter === '30' ? dateInDays(Number(dueFilter)) : ''
+    const filtered = base.filter((item) => {
+      if (cardFilter !== 'Todos' || paymentFilter !== 'Todas') {
+        if (item.type === 'income') return false
+        if (cardFilter === '__none' ? Boolean(item.card) : cardFilter !== 'Todos' && item.card !== cardFilter) return false
+        if (paymentFilter === '__none' ? Boolean(item.payment) : paymentFilter !== 'Todas' && item.payment !== paymentFilter) return false
+      }
+      if (dueFilter === 'overdue' && !(item.status === 'planned' && item.date < today)) return false
+      if (dueFilter === 'today' && !(item.status === 'planned' && item.date === today)) return false
+      if (dueLimit && !(item.status === 'planned' && item.date >= today && item.date <= dueLimit)) return false
+      if (dueFilter === 'custom' && ((dueFrom && item.date < dueFrom) || (dueTo && item.date > dueTo))) return false
       if (typeFilter === 'expense' && item.type !== 'expense') return false
       if (typeFilter === 'income' && item.type !== 'income') return false
       if (typeFilter === 'installments' && !(item.type === 'expense' && item.installmentTotal && item.installmentNumber)) return false
       if (categoryFilter !== 'Todas' && item.category !== categoryFilter) return false
       if (normalizedQuery && !`${item.description} ${item.category} ${item.payment ?? ''} ${item.card ?? ''}`.toLocaleLowerCase('pt-BR').includes(normalizedQuery)) return false
       return true
-    }).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
-  }, [categoryFilter, convertedExpenseIds, data.expenses, data.incomes, periodFilter, query, recurringAll, recurringMonth, scheduledInstallments, selectedMonth, typeFilter])
+    })
+    // Com filtro de vencimento, o que vence primeiro aparece primeiro.
+    return filtered.sort((a, b) => dueFilter === 'any' ? b.date.localeCompare(a.date) || b.id.localeCompare(a.id) : a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+  }, [cardFilter, categoryFilter, convertedExpenseIds, data.expenses, data.incomes, dueFilter, dueFrom, dueTo, paymentFilter, periodFilter, query, recurringAhead, recurringAll, recurringMonth, scheduledInstallments, selectedMonth, typeFilter])
   const visibleSpent = ledgerRows.filter((item) => item.type === 'expense' && item.status === 'paid').reduce((sum, item) => sum + item.amount, 0)
   const visiblePlanned = ledgerRows.filter((item) => item.type === 'expense' && item.status === 'planned').reduce((sum, item) => sum + item.amount, 0)
   const visibleReceived = ledgerRows.filter((item) => item.type === 'income' && item.status === 'paid').reduce((sum, item) => sum + item.amount, 0)
-  const hasFilters = Boolean(query || categoryFilter !== 'Todas' || typeFilter !== 'all' || periodFilter !== 'month')
+  const hasFilters = Boolean(query || categoryFilter !== 'Todas' || typeFilter !== 'all' || periodFilter !== 'month' || cardFilter !== 'Todos' || paymentFilter !== 'Todas' || dueFilter !== 'any')
 
   function resetFilters() {
     setQuery('')
     setCategoryFilter('Todas')
     setTypeFilter('all')
     setPeriodFilter('month')
+    setCardFilter('Todos')
+    setPaymentFilter('Todas')
+    setDueFilter('any')
+    setDueFrom('')
+    setDueTo('')
   }
 
   function openNewEntry(type: 'expense' | 'income') {
@@ -732,6 +775,13 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
               <label className="search-wrap"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar descrição ou origem" aria-label="Buscar lançamentos" /></label>
               <label className="select-wrap"><Filter size={14} /><select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value as 'month' | 'all')} aria-label="Filtrar período"><option value="month">Mês selecionado</option><option value="all">Todos os períodos</option></select><ChevronDown size={13} /></label>
               <label className="select-wrap"><Tags size={14} /><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Filtrar categoria"><option value="Todas">Todas categorias</option>{filterCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select><ChevronDown size={13} /></label>
+            </div>
+            <div className="finance-filters finance-filters-extra">
+              <label className="select-wrap"><CreditCard size={14} /><select value={cardFilter} onChange={(event) => setCardFilter(event.target.value)} aria-label="Filtrar cartão"><option value="Todos">Todos os cartões</option>{knownCards.map((name) => <option key={name} value={name}>{name}</option>)}<option value="__none">Sem cartão</option></select><ChevronDown size={13} /></label>
+              <label className="select-wrap"><WalletCards size={14} /><select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)} aria-label="Filtrar forma de pagamento"><option value="Todas">Toda forma de pagamento</option>{paymentMethods.map((name) => <option key={name} value={name}>{name}</option>)}<option value="__none">Não informado</option></select><ChevronDown size={13} /></label>
+              <label className="select-wrap"><CalendarDays size={14} /><select value={dueFilter} onChange={(event) => setDueFilter(event.target.value as DueFilter)} aria-label="Filtrar por vencimento">{dueOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={13} /></label>
+              {dueFilter === 'custom' && <><label className="finance-date-filter">De<input type="date" value={dueFrom} onChange={(event) => setDueFrom(event.target.value)} aria-label="Vencimento a partir de" /></label><label className="finance-date-filter">Até<input type="date" value={dueTo} onChange={(event) => setDueTo(event.target.value)} aria-label="Vencimento até" /></label></>}
+              {dueFilter !== 'any' && <p className="finance-due-note">Vencimentos de todos os meses, do mais próximo ao mais distante.</p>}
             </div>
             <div className="finance-filter-tabs" role="group" aria-label="Tipo de lançamento">
               <button className={typeFilter === 'all' ? 'selected' : ''} type="button" onClick={() => setTypeFilter('all')}>Tudo</button>
