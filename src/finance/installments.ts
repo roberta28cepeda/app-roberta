@@ -10,6 +10,8 @@ export type ScheduledInstallment = {
   installmentNumber: number
   installmentTotal: number
   status: 'planned' | 'paid'
+  card?: string
+  payment?: string
 }
 
 export function addMonthsToDate(value: string, offset: number) {
@@ -43,6 +45,8 @@ export function scheduleInstallments(plan: InstallmentPlan): ScheduledInstallmen
       installmentNumber: number,
       installmentTotal: plan.totalInstallments,
       status: paid.has(number) ? 'paid' : 'planned',
+      ...(plan.card ? { card: plan.card } : {}),
+      ...(plan.payment ? { payment: plan.payment } : {}),
     })
   }
   return installments

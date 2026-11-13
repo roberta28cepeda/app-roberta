@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Plus, Repeat, Trash2, X } from 'lucide-react'
 import type { AppRecord, CollectionName, LifeData, RecurringItem } from '../types'
 import { defaultCategoryNames } from './categories'
+import { cardMethods, paymentFields, paymentMethods, paymentLabel } from './payment'
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const incomeSources = ['Salário', 'Renda extra', 'Investimentos', 'Reembolso', 'Outros']
@@ -37,6 +38,8 @@ export default function RecurringModal({ data, saveItem, removeItem, onClose }: 
   const [amount, setAmount] = useState('')
   const [day, setDay] = useState(String(new Date().getDate()))
   const [startMonth, setStartMonth] = useState(monthNow)
+  const [payment, setPayment] = useState('')
+  const [card, setCard] = useState('')
   const [error, setError] = useState('')
   const categories = [...defaultCategoryNames, ...data.categories.map((item) => item.name).filter((name) => !defaultCategoryNames.includes(name))]
   const options = kind === 'expense' ? categories : incomeSources
@@ -52,6 +55,7 @@ export default function RecurringModal({ data, saveItem, removeItem, onClose }: 
     const item: RecurringItem = {
       id: newId(), kind, description: description.trim(), category: options.includes(category) ? category : options[0],
       amount: value, dayOfMonth: dayNumber, startMonth, active: true, lastGenerated: '', createdAt: new Date().toISOString(),
+      ...(kind === 'expense' ? paymentFields(payment, card) : {}),
     }
     try {
       await saveItem('recurring', item)
@@ -71,7 +75,7 @@ export default function RecurringModal({ data, saveItem, removeItem, onClose }: 
         {items.length > 0 && <div className="recurring-list">{items.map((item) => (
           <div className={`recurring-row${item.active ? '' : ' recurring-off'}`} key={item.id}>
             <span className="recurring-icon"><Repeat size={15} /></span>
-            <span className="recurring-text"><strong>{item.description}</strong><small>{item.kind === 'income' ? 'Recebimento' : 'Despesa'} · {item.category} · todo dia {item.dayOfMonth} · desde {item.startMonth.split('-').reverse().join('/')}</small></span>
+            <span className="recurring-text"><strong>{item.description}</strong><small>{item.kind === 'income' ? 'Recebimento' : 'Despesa'} · {item.category}{paymentLabel(item.payment, item.card) ? ` · ${paymentLabel(item.payment, item.card)}` : ''} · todo dia {item.dayOfMonth} · desde {item.startMonth.split('-').reverse().join('/')}</small></span>
             <strong className="recurring-amount">{currency.format(item.amount)}</strong>
             <button className="ghost-button" type="button" onClick={() => void saveItem('recurring', { ...item, active: !item.active })}>{item.active ? 'Pausar' : 'Reativar'}</button>
             <button className="icon-button danger-hover" type="button" aria-label={`Excluir ${item.description}`} onClick={() => { if (window.confirm(`Excluir a recorrência “${item.description}”? Os lançamentos já criados continuam.`)) void removeItem('recurring', item.id) }}><Trash2 size={14} /></button>
@@ -82,6 +86,7 @@ export default function RecurringModal({ data, saveItem, removeItem, onClose }: 
             <label>Tipo<select value={kind} onChange={(event) => { const next = event.target.value as 'expense' | 'income'; setKind(next); setCategory(next === 'expense' ? 'Casa' : 'Salário') }}><option value="expense">Despesa</option><option value="income">Recebimento</option></select></label>
             <label>{kind === 'expense' ? 'Categoria' : 'Origem'}<select value={category} onChange={(event) => setCategory(event.target.value)}>{options.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
           </div>
+          {kind === 'expense' && <div className="form-two"><label>Forma de pagamento<select value={payment} onChange={(event) => setPayment(event.target.value)}><option value="">Não informar</option>{paymentMethods.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>{cardMethods.includes(payment) ? <label>Cartão<input value={card} onChange={(event) => setCard(event.target.value)} placeholder="Ex.: Nubank" maxLength={40} /></label> : <span />}</div>}
           <label>Descrição<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Aluguel, Netflix, Salário" maxLength={80} /></label>
           <div className="form-two">
             <label>Valor (R$)<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" /></label>

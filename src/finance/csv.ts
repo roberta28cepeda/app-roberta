@@ -1,4 +1,5 @@
 import type { Expense, Income } from '../types'
+import { paymentFields } from './payment'
 
 function quoteCsv(value: string) {
   const safe = /^[\u0000-\u0020]*[=+@-]/.test(value) ? `'${value}` : value
@@ -31,12 +32,13 @@ function stamp() {
 
 export function downloadExpensesCsv(expenses: Expense[]) {
   const rows = [
-    ['Data', 'Descrição', 'Categoria', 'Valor da parcela (R$)', 'Parcela atual', 'Total de parcelas', 'Parcelas restantes'],
+    ['Data', 'Descrição', 'Categoria', 'Valor da parcela (R$)', 'Parcela atual', 'Total de parcelas', 'Parcelas restantes', 'Forma de pagamento', 'Cartão'],
     ...[...expenses].sort((a, b) => b.date.localeCompare(a.date)).map((item) => [
       csvDate(item.date), item.description, item.category, csvAmount(item.amount),
       item.installmentNumber ? String(item.installmentNumber) : '',
       item.installmentTotal ? String(item.installmentTotal) : '',
       item.installmentNumber && item.installmentTotal ? String(item.installmentTotal - item.installmentNumber) : '',
+      item.payment ?? '', item.card ?? '',
     ]),
   ]
   downloadCsv(`minha-vida-gastos-${stamp()}.csv`, rows)
@@ -116,6 +118,8 @@ export function parseExpenseCsv(text: string, existing: Expense[]) {
   const amountIndex = headers.findIndex((header) => header.includes('valor'))
   const installmentIndex = headers.findIndex((header) => header.includes('parcela atual'))
   const totalInstallmentsIndex = headers.findIndex((header) => header.includes('total de parcelas'))
+  const paymentIndex = headers.findIndex((header) => header.includes('forma de pagamento'))
+  const cardIndex = headers.findIndex((header) => header === 'cartao')
   if (dateIndex < 0 || descriptionIndex < 0 || amountIndex < 0) {
     throw new Error('O CSV precisa ter as colunas Data, Descrição e Valor.')
   }
@@ -147,6 +151,7 @@ export function parseExpenseCsv(text: string, existing: Expense[]) {
     const item: Expense = {
       id: createId(), description, category, amount, date,
       ...(installmentNumber !== undefined ? { installmentNumber, installmentTotal } : {}),
+      ...paymentFields(paymentIndex >= 0 ? row[paymentIndex]?.trim() ?? '' : '', cardIndex >= 0 ? row[cardIndex]?.trim() ?? '' : ''),
     }
     const key = signature(item)
     if (signatures.has(key)) { ignored += 1; continue }

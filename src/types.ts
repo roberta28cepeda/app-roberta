@@ -6,6 +6,8 @@ export type Expense = {
   date: string
   installmentNumber?: number
   installmentTotal?: number
+  card?: string
+  payment?: string
 }
 
 export type InstallmentPlan = {
@@ -18,6 +20,8 @@ export type InstallmentPlan = {
   totalInstallments: number
   paidInstallments: number[]
   sourceExpenseId?: string
+  card?: string
+  payment?: string
 }
 
 export type Income = {
@@ -149,6 +153,8 @@ export type RecurringItem = {
   active: boolean
   lastGenerated: string
   createdAt: string
+  card?: string
+  payment?: string
 }
 
 export type AppRecord = RecurringItem | Expense | InstallmentPlan | Income | MonthlyBudget | Goal | Task | Plan | DailyNote | WishlistItem | ReadingBook | RestockItem | WorkoutRoutine | WorkoutLog | CustomCategory

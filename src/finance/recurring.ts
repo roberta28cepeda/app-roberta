@@ -31,7 +31,7 @@ export function generateRecurring(items: RecurringItem[], today: string) {
       const date = recurringDate(month, item.dayOfMonth)
       if (date > today) break
       const id = `rec-${item.id}-${month}`
-      if (item.kind === 'expense') expenses.push({ id, description: item.description, category: item.category, amount: item.amount, date })
+      if (item.kind === 'expense') expenses.push({ id, description: item.description, category: item.category, amount: item.amount, date, ...(item.payment ? { payment: item.payment } : {}), ...(item.card ? { card: item.card } : {}) })
       else incomes.push({ id, description: item.description, source: item.category, amount: item.amount, date })
       last = month
       month = shiftMonthKey(month, 1)

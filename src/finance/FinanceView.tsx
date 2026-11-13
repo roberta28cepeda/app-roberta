@@ -28,6 +28,7 @@ import type { AppRecord, CollectionName, CustomCategory, Expense, Income, Instal
 import { defaultCategoryNames, getCategoryMeta, getSavingsIdea } from './categories'
 import { downloadExpensesCsv, downloadIncomesCsv, parseExpenseCsv, parseIncomeCsv } from './csv'
 import { scheduleInstallments } from './installments'
+import { cardMethods, paymentFields, paymentLabel, paymentMethods, readLastPayment, saveLastPayment } from './payment'
 import RecurringModal from './RecurringModal'
 import './FinanceView.css'
 
@@ -47,6 +48,8 @@ type EntryForm = {
   installmentNumber: string
   installmentTotal: string
   firstInstallmentPaid: boolean
+  payment: string
+  card: string
 }
 
 type LedgerRow = {
@@ -60,6 +63,8 @@ type LedgerRow = {
   installmentTotal?: number
   planId?: string
   status: 'paid' | 'planned'
+  card?: string
+  payment?: string
 }
 
 type InstallmentPanelItem = {
@@ -161,6 +166,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
   const [form, setForm] = useState<EntryForm>({
     type: 'expense', description: '', category: 'Alimentação', amount: '', date: todayKey(),
     installmentsEnabled: false, installmentNumber: '1', installmentTotal: '2', firstInstallmentPaid: false,
+    payment: '', card: '',
   })
 
   const monthlyBudget = useMemo(
@@ -178,6 +184,11 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
     ...data.expenses.map((item) => item.category),
     ...data.installmentPlans.map((item) => item.category),
   ])], [data.categories, data.expenses, data.installmentPlans])
+  const knownCards = useMemo(() => [...new Set([
+    ...data.expenses.map((item) => item.card),
+    ...data.installmentPlans.map((item) => item.card),
+    ...data.recurring.map((item) => item.card),
+  ].filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b, 'pt-BR')), [data.expenses, data.installmentPlans, data.recurring])
   const sourceOptions = useMemo(() => [...new Set([
     ...incomeSources,
     ...data.incomes.map((item) => item.source),
@@ -199,6 +210,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
     () => scheduledInstallments.filter((item) => item.status === 'paid').map((item) => ({
       id: item.id, description: item.description, category: item.category, amount: item.amount,
       date: item.date, installmentNumber: item.installmentNumber, installmentTotal: item.installmentTotal,
+      ...(item.card ? { card: item.card } : {}), ...(item.payment ? { payment: item.payment } : {}),
     })),
     [scheduledInstallments],
   )
@@ -260,6 +272,18 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
     ...getCategoryMeta(category),
     total: analysisExpenses.filter((item) => item.category === category).reduce((sum, item) => sum + item.amount, 0),
   })).filter((item) => item.total > 0).sort((a, b) => b.total - a.total), [analysisExpenses, expenseCategories])
+  const paymentBreakdown = useMemo(() => {
+    const groups = new Map<string, { label: string; paid: number; planned: number }>()
+    const add = (label: string, key: 'paid' | 'planned', amount: number) => {
+      const entry = groups.get(label) ?? { label, paid: 0, planned: 0 }
+      entry[key] += amount
+      groups.set(label, entry)
+    }
+    for (const item of analysisExpenses) add(paymentLabel(item.payment, item.card) || 'Não informado', 'paid', item.amount)
+    const planned = periodFilter === 'all' ? scheduledInstallments.filter((item) => item.status === 'planned') : pendingMonthInstallments
+    for (const item of planned) add(paymentLabel(item.payment, item.card) || 'Não informado', 'planned', item.amount)
+    return [...groups.values()].sort((a, b) => (b.paid + b.planned) - (a.paid + a.planned))
+  }, [analysisExpenses, pendingMonthInstallments, periodFilter, scheduledInstallments])
   const topCategory = breakdown[0]
   const savingsIdea = getSavingsIdea(topCategory?.label)
   const chartGradient = useMemo(() => {
@@ -291,11 +315,12 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       id: item.id, type: 'expense', date: item.date, description: item.description,
       category: item.category, amount: item.amount,
       installmentNumber: item.installmentNumber, installmentTotal: item.installmentTotal, status: 'paid',
+      card: item.card, payment: item.payment,
     }))
     const automatic: LedgerRow[] = scheduledInstallments.map((item) => ({
       id: item.id, planId: item.planId, type: 'expense', date: item.date, description: item.description,
       category: item.category, amount: item.amount, installmentNumber: item.installmentNumber,
-      installmentTotal: item.installmentTotal, status: item.status,
+      installmentTotal: item.installmentTotal, status: item.status, card: item.card, payment: item.payment,
     }))
     const incomes: LedgerRow[] = data.incomes.map((item) => ({
       id: item.id, type: 'income', date: item.date, description: item.description,
@@ -311,7 +336,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       if (typeFilter === 'income' && item.type !== 'income') return false
       if (typeFilter === 'installments' && !(item.type === 'expense' && item.installmentTotal && item.installmentNumber)) return false
       if (categoryFilter !== 'Todas' && item.category !== categoryFilter) return false
-      if (normalizedQuery && !`${item.description} ${item.category}`.toLocaleLowerCase('pt-BR').includes(normalizedQuery)) return false
+      if (normalizedQuery && !`${item.description} ${item.category} ${item.payment ?? ''} ${item.card ?? ''}`.toLocaleLowerCase('pt-BR').includes(normalizedQuery)) return false
       return true
     }).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
   }, [categoryFilter, convertedExpenseIds, data.expenses, data.incomes, periodFilter, query, scheduledInstallments, selectedMonth, typeFilter])
@@ -341,6 +366,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       installmentNumber: '1',
       installmentTotal: '2',
       firstInstallmentPaid: false,
+      ...(type === 'expense' ? readLastPayment() : { payment: '', card: '' }),
     })
     setFormOpen(true)
   }
@@ -356,6 +382,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       installmentNumber: String(item.installmentNumber ?? 1),
       installmentTotal: String(item.installmentTotal ?? 2),
       firstInstallmentPaid: true,
+      payment: item.payment ?? '', card: item.card ?? '',
     })
     setFormOpen(true)
   }
@@ -368,7 +395,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       type: 'income', description: item.description, category: item.source,
       amount: String(item.amount).replace('.', ','), date: item.date,
       installmentsEnabled: false, installmentNumber: '1', installmentTotal: '2',
-      firstInstallmentPaid: false,
+      firstInstallmentPaid: false, payment: '', card: '',
     })
     setFormOpen(true)
   }
@@ -383,6 +410,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
       installmentsEnabled: true, installmentNumber: String(item.firstInstallmentNumber),
       installmentTotal: String(item.totalInstallments),
       firstInstallmentPaid: item.paidInstallments.includes(item.firstInstallmentNumber),
+      payment: item.payment ?? '', card: item.card ?? '',
     })
     setFormOpen(true)
   }
@@ -437,6 +465,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
             amount, firstDueDate: form.date, firstInstallmentNumber: installmentNumber,
             totalInstallments: installmentTotal, paidInstallments: [...paid].sort((a, b) => a - b),
             ...((previous?.sourceExpenseId ?? sourceExpense?.id) ? { sourceExpenseId: previous?.sourceExpenseId ?? sourceExpense?.id } : {}),
+            ...paymentFields(form.payment, form.card),
           }
           await saveItem('installmentPlans', plan)
           if (sourceExpense) await removeItem('expenses', sourceExpense.id)
@@ -445,9 +474,11 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
             id: editing?.type === 'expense' ? editing.id : createId(),
             description: form.description.trim(), category: categoryName, amount, date: form.date,
             ...(form.installmentsEnabled ? { installmentNumber, installmentTotal } : {}),
+            ...paymentFields(form.payment, form.card),
           }
           await saveItem('expenses', expense)
         }
+        saveLastPayment(form.payment, form.card)
       } else {
         const income: Income = {
           id: editing?.type === 'income' ? editing.id : createId(),
@@ -685,7 +716,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
                   <article className={`expense-row finance-ledger-row finance-ledger-${item.type}${item.status === 'planned' ? ' finance-ledger-planned' : ''}`} key={`${item.type}:${item.id}`}>
                     <time className="expense-date finance-ledger-date">{formatDate(item.date)}</time>
                     <span className={`expense-icon finance-ledger-icon finance-icon-${item.type}`}><CategoryIcon size={16} /></span>
-                    <span className="expense-description finance-ledger-description"><strong>{item.description}</strong><small>{item.type === 'income' ? `Recebido · ${item.category}` : item.category}</small>
+                    <span className="expense-description finance-ledger-description"><strong>{item.description}</strong><small>{item.type === 'income' ? `Recebido · ${item.category}` : `${item.category}${paymentLabel(item.payment, item.card) ? ` · ${paymentLabel(item.payment, item.card)}` : ''}`}</small>
                       {item.planId && item.installmentNumber && <small className="finance-installment-detail">Parcela {item.installmentNumber}/{item.installmentTotal} · {item.status === 'planned' ? 'prevista' : 'paga'} · <button className="finance-installment-toggle" type="button" onClick={() => void setInstallmentPaid(item.planId!, item.installmentNumber!, item.status !== 'paid')}>{item.status === 'planned' ? 'Marcar como paga' : 'Desfazer pagamento'}</button></small>}
                       {item.type === 'expense' && !item.planId && item.installmentTotal && item.installmentNumber && <small className="finance-installment-detail">Parcela {item.installmentNumber}/{item.installmentTotal} · faltam {remainingCount}{remainingCount ? ` · ${currency.format(remainingAmount)} restantes` : ' · última parcela'}</small>}
                     </span>
@@ -693,7 +724,7 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
                     <span className="row-actions finance-row-actions">
                       <button className="icon-button" type="button" aria-label={plan ? `Editar todas as parcelas de ${item.description}` : `Editar ${item.description}`} onClick={() => {
                         if (plan) openEditInstallmentPlan(plan)
-                        else if (item.type === 'expense') openEditExpense({ id: item.id, description: item.description, category: item.category, amount: item.amount, date: item.date, installmentNumber: item.installmentNumber, installmentTotal: item.installmentTotal })
+                        else if (item.type === 'expense') openEditExpense({ id: item.id, description: item.description, category: item.category, amount: item.amount, date: item.date, installmentNumber: item.installmentNumber, installmentTotal: item.installmentTotal, card: item.card, payment: item.payment })
                         else openEditIncome({ id: item.id, description: item.description, source: item.category, amount: item.amount, date: item.date })
                       }}><Pencil size={14} /></button>
                       <button className="icon-button danger-hover" type="button" aria-label={plan ? `Excluir o plano de parcelas de ${item.description}` : `Excluir ${item.description}`} onClick={() => void deleteEntry(item)}><Trash2 size={14} /></button>
@@ -735,6 +766,11 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
             <div className="finance-category-insight"><Sparkles size={15} /><p>{topCategory ? `${topCategory.label} representa ${Math.round((topCategory.total / analysisTotal) * 100)}% dos gastos analisados.` : 'Seu próximo lançamento já pode aparecer aqui.'}</p></div>
           </section>
 
+          <section className="panel finance-payment-panel">
+            <div className="panel-heading finance-side-heading"><div><span className="section-kicker">Como você paga</span><h2>Por cartão e pagamento</h2></div><CreditCard size={17} /></div>
+            {paymentBreakdown.length ? <div className="finance-payment-list">{paymentBreakdown.map((item) => <div className="finance-payment-row" key={item.label}><span>{item.label}</span><strong>{currency.format(item.paid + item.planned)}<small>{item.planned > 0 ? `${currency.format(item.paid)} pago · ${currency.format(item.planned)} previsto` : 'pago'}</small></strong></div>)}</div> : <p className="finance-payment-empty">Informe a forma de pagamento nos lançamentos para ver quanto vai em cada cartão.</p>}
+          </section>
+
           <section className="panel finance-installments-panel">
             <div className="panel-heading finance-side-heading"><div><span className="section-kicker">Compras parceladas</span><h2>Parcelas em andamento</h2></div><span className="finance-installment-count">{activeInstallments.length}</span></div>
             <div className="finance-installment-total"><span>Saldo futuro estimado</span><strong>{currency.format(remainingInstallmentTotal)}</strong></div>
@@ -755,6 +791,8 @@ function FinanceView({ data, saveItem, removeItem }: FinanceViewProps) {
           {form.type === 'income' ? <label>Origem<select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{sourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label> : <>
             <label>Categoria<select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{expenseCategories.map((category) => <option key={category} value={category}>{category}</option>)}<option value="__nova">+ Criar categoria personalizada</option></select></label>
             {form.category === '__nova' && <label>Nome da nova categoria<input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="Ex.: Pets, viagem, estudos" maxLength={32} /></label>}
+            <div className="form-two"><label>Forma de pagamento<select value={form.payment} onChange={(event) => setForm({ ...form, payment: event.target.value })}><option value="">Não informar</option>{paymentMethods.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>{cardMethods.includes(form.payment) ? <label>Qual cartão?<input list="finance-cards" value={form.card} onChange={(event) => setForm({ ...form, card: event.target.value })} placeholder="Ex.: Nubank, Itaú Visa" maxLength={40} /></label> : <span />}</div>
+            <datalist id="finance-cards">{knownCards.map((name) => <option key={name} value={name} />)}</datalist>
             <label className="check-label"><input type="checkbox" checked={form.installmentsEnabled} disabled={editing?.type === 'installmentPlan'} onChange={(event) => setForm({ ...form, installmentsEnabled: event.target.checked })} /><span>Esta despesa é parcelada</span></label>
             {form.installmentsEnabled && <div className="form-two"><label>Primeira parcela cadastrada<input type="number" min="1" max="120" value={form.installmentNumber} onChange={(event) => setForm({ ...form, installmentNumber: event.target.value })} /></label><label>Total de parcelas<input type="number" min="2" max="120" value={form.installmentTotal} onChange={(event) => setForm({ ...form, installmentTotal: event.target.value })} /></label><label className="check-label finance-first-paid"><input type="checkbox" checked={form.firstInstallmentPaid} onChange={(event) => setForm({ ...form, firstInstallmentPaid: event.target.checked })} /><span>A primeira parcela já foi paga</span></label><p className="finance-installment-form-note">As parcelas a partir do número informado serão criadas automaticamente nos meses seguintes. As previstas reduzem o valor livre; só contam como gasto depois de marcadas como pagas.</p></div>}
           </>}
