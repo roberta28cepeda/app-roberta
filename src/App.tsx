@@ -35,7 +35,7 @@ import {
   X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { auth, firebaseConfigured, signInWithGoogle } from './firebase'
+import { auth, firebaseConfigured, LOGIN_PENDING_KEY, signInWithGoogle } from './firebase'
 import { clearLocalData, countRecords, readLocalData, useLifeData } from './data/useLifeData'
 import { downloadBackup, parseBackup } from './backup'
 import { generateRecurring } from './finance/recurring'
@@ -157,7 +157,18 @@ export default function App() {
       setAuthError(error.message)
       setAuthReady(true)
     })
-    void getRedirectResult(auth).catch((error: unknown) => setAuthError(friendlyError(error)))
+    const firebaseAuth = auth
+    void (async () => {
+      let pending = false
+      try { pending = localStorage.getItem(LOGIN_PENDING_KEY) !== null; localStorage.removeItem(LOGIN_PENDING_KEY) } catch { /* ignorado */ }
+      try {
+        const result = await getRedirectResult(firebaseAuth)
+        await firebaseAuth.authStateReady()
+        if (pending && !result && !firebaseAuth.currentUser) {
+          setAuthError('O Google concluiu o login, mas o navegador não devolveu o resultado ao app. Abra o endereço em uma aba normal do navegador (fora do app instalado), permita pop-ups para este site e tente de novo.')
+        }
+      } catch (error: unknown) { setAuthError(friendlyError(error)) }
+    })()
     return unsubscribe
   }, [])
 
