@@ -3,7 +3,7 @@
 .life-planner-tabs { display: flex; gap: 5px; margin: 0 0 18px; padding: 4px; overflow-x: auto; border: 1px solid #e3edf2; border-radius: 11px; background: #fff; scrollbar-width: none; }
 .life-planner-tabs::-webkit-scrollbar { display: none; }
 .life-planner-tabs button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 7px; min-height: 37px; padding: 8px 12px; border: 0; border-radius: 8px; color: #82939c; background: transparent; font-size: 10px; font-weight: 600; white-space: nowrap; }
-.life-planner-tabs button.active { color: #327395; background: #eaf5fb; }
+.life-planner-tabs button.active { color: var(--blue-dark); background: var(--sky-soft); }
 .planner-page-error { margin: -4px 0 14px; }
 .planner-date-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 20px 22px; margin-bottom: 13px; border: 1px solid #dbeaf1; border-radius: 12px; background: linear-gradient(115deg, #edf7fb, #fff7fa); }
 .planner-date-card h2 { margin-top: 6px; color: #304a59; font-size: 21px; letter-spacing: -.04em; text-transform: capitalize; }
@@ -47,7 +47,7 @@
 .planner-empty-plan small { color: #94a3aa; font-size: 8px; }
 .planner-quick-links { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
 .planner-quick-links button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 7px 10px; border: 1px solid #e1ebf0; border-radius: 8px; color: #6e8590; background: #fff; font-size: 9px; }
-.planner-quick-links button:hover { color: #327395; border-color: #bed9e7; }
+.planner-quick-links button:hover { color: var(--blue-dark); border-color: #bed9e7; }
 
 .planner-calendar { overflow: hidden; }
 .planner-calendar-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 19px 13px; }
@@ -59,7 +59,7 @@
 .planner-calendar-day { min-width: 0; min-height: 62px; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 8px; padding: 7px 2px 5px; color: #526a77; background: #fff; font-size: 10px; }
 .planner-calendar-day:hover { background: #f3f9fc; }
 .planner-calendar-day.outside { color: #c3cdd2; }
-.planner-calendar-day.current > span { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; background: #4c91b8; }
+.planner-calendar-day.current > span { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; background: var(--blue); }
 .planner-calendar-day.chosen { border-color: #b9d8e6; background: #f0f8fb; }
 .planner-event-dots { display: flex; gap: 3px; height: 5px; }
 .event-dot { width: 5px; height: 5px; display: inline-block; border-radius: 50%; background: #7db6cb; }
@@ -99,7 +99,7 @@
 .planner-wish-card h2 { margin-top: 11px; color: #3f5664; font-size: 13px; letter-spacing: -.025em; }
 .planner-wish-card > p { margin-top: 5px; color: #8b9aa2; font-size: 9px; line-height: 1.5; white-space: pre-wrap; }
 .planner-wish-bottom { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 11px; }
-.planner-wish-bottom > strong { color: #327395; font-size: 11px; }
+.planner-wish-bottom > strong { color: var(--blue-dark); font-size: 11px; }
 .planner-wish-bottom .text-button { font-size: 8px; }
 .planner-wish-thumbs { display: flex; gap: 5px; margin-top: 10px; }
 .planner-wish-thumbs button { width: 34px; height: 34px; overflow: hidden; border: 1px solid #e3edf1; border-radius: 6px; padding: 0; background: #f4f7f9; }

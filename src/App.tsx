@@ -19,6 +19,7 @@ import {
   Cloud,
   CloudOff,
   Download,
+  Palette,
   Upload,
   Dumbbell,
   Home,
@@ -38,6 +39,8 @@ import type { LucideIcon } from 'lucide-react'
 import { auth, firebaseConfigured, LOGIN_PENDING_KEY, signInWithGoogle } from './firebase'
 import { clearLocalData, countRecords, readLocalData, useLifeData } from './data/useLifeData'
 import { downloadBackup, parseBackup } from './backup'
+import Personalize from './Personalize'
+import { applyTheme, cacheProfile, readCachedProfile } from './theme'
 import { legacyRecurringIds, recurringEntries } from './finance/recurring'
 import FinanceView from './finance/FinanceView'
 import { scheduleInstallments } from './finance/installments'
@@ -185,7 +188,18 @@ export default function App() {
   const { data, status, error: dataError, saveItem, removeItem, saveMany } = useLifeData(account?.uid ?? null, demoMode)
   const [localPending, setLocalPending] = useState(() => (firebaseConfigured ? countRecords(readLocalData()) : 0))
   const restoreInput = useRef<HTMLInputElement>(null)
-  const displayName = account?.displayName || account?.email?.split('@')[0] || 'Minha conta'
+  const [personalizeOpen, setPersonalizeOpen] = useState(false)
+  const [cachedProfile] = useState(readCachedProfile)
+  const profile = data.settings.find((item) => item.id === 'profile') ?? null
+  const profileReady = status === 'saved' || status === 'demo'
+  const activeProfile = profileReady ? profile : (profile ?? cachedProfile)
+  useEffect(() => {
+    applyTheme(activeProfile)
+    if (profileReady) cacheProfile(profile)
+  }, [activeProfile, profile, profileReady])
+  const googleName = account?.displayName || account?.email?.split('@')[0] || 'Minha conta'
+  const displayName = activeProfile?.name?.trim() || googleName
+  const photo = activeProfile?.photo || ''
   const avatarInitial = displayName.trim().charAt(0).toLocaleUpperCase('pt-BR') || 'M'
 
   async function removePlannerItem(name: CollectionName, id: string) {
@@ -331,11 +345,12 @@ export default function App() {
         <div className="sidebar-bottom">
           <div className="sidebar-actions">
             <button className="sidebar-action" type="button" onClick={() => void handleInstall()}><Smartphone size={15} />Instalar no aparelho</button>
+            <button className="sidebar-action" type="button" onClick={() => setPersonalizeOpen(true)}><Palette size={15} />Personalizar</button>
             <button className="sidebar-action" type="button" onClick={() => void handleReminderToggle()}><Bell size={15} />{remindersEnabled ? 'Lembretes ativos' : 'Ativar lembretes'}</button>
           </div>
           <p className="storage-note"><span className="status-dot" /><span><strong>{demoMode ? 'Modo de demonstração' : 'Dados privados'}</strong><br />{demoMode ? 'Salvos apenas neste navegador' : 'Acesso pela sua conta Google'}</span></p>
           <div className="profile-card">
-            <span className="avatar">{avatarInitial}</span>
+            <span className="avatar">{photo ? <img src={photo} alt="" /> : avatarInitial}</span>
             <div><strong>{displayName}</strong><span>{demoMode ? 'Prévia local' : 'Conta conectada'}</span></div>
             {account && <button className="icon-button on-dark" type="button" onClick={() => void handleSignOut()} aria-label="Sair"><LogOut size={15} /></button>}
           </div>
@@ -348,7 +363,7 @@ export default function App() {
           <div className="topbar-actions">
             <StatusPill status={status} />
             <button className="icon-button subtle" type="button" onClick={() => void handleInstall()} aria-label="Instalar aplicativo"><ArrowDownToLine size={17} /></button>
-            <button className="top-avatar" type="button" title={displayName}>{avatarInitial}</button>
+            <button className="top-avatar" type="button" title="Personalizar" aria-label="Personalizar" onClick={() => setPersonalizeOpen(true)}>{photo ? <img src={photo} alt="" /> : avatarInitial}</button>
           </div>
         </header>
         {demoMode && <div className="demo-banner"><CircleHelp size={16} /><span><strong>Prévia local:</strong> ainda não está ligada à sua conta Google. O que você inserir fica somente neste navegador.</span></div>}
@@ -367,6 +382,8 @@ export default function App() {
           </button>
         ))}
       </nav>
+
+      {personalizeOpen && <Personalize profile={activeProfile} fallbackName={googleName} onSave={(next) => saveItem('settings', next)} onClose={() => setPersonalizeOpen(false)} />}
 
       {installHelpOpen && <Modal title="Instalar Minha Vida" onClose={() => setInstallHelpOpen(false)}>
         <div className="install-steps">
